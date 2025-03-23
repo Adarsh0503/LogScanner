@@ -4,41 +4,27 @@ import argparse
 import os
 from datetime import datetime
 
-def search_with_grep(file_path, search_parameter, output_file=None, use_ripgrep=False):
+def search_with_powershell(file_path, search_parameter, output_file=None):
     """
-    Search log file using grep or ripgrep (rg) command line tools.
-    
-    Args:
-        file_path: Path to log file
-        search_parameter: String to search for
-        output_file: Path to output file
-        use_ripgrep: Whether to use ripgrep instead of grep
+    Search log file using PowerShell's Select-String (Windows native solution)
     """
     # Generate default output filename if not provided
     if output_file is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_file = f"log_results_{search_parameter}_{timestamp}.log"
     
-    # Choose tool and construct command
-    if use_ripgrep and subprocess.run(['which', 'rg'], stdout=subprocess.PIPE, stderr=subprocess.PIPE).returncode == 0:
-        # ripgrep is installed
-        tool = "rg"
-        # -F: fixed strings, -a: binary files, -N: line number
-        cmd = [tool, "-F", search_parameter, file_path, "--no-heading"]
-    else:
-        # fallback to grep
-        tool = "grep"
-        # -F: fixed strings, -a: binary files, -n: line number
-        cmd = [tool, "-F", "-a", search_parameter, file_path]
-    
-    print(f"Searching using {tool}...")
+    print("Searching using PowerShell Select-String...")
     start_time = datetime.now()
+    
+    # Construct PowerShell command
+    ps_cmd = f'Select-String -Path "{file_path}" -SimpleMatch "{search_parameter}" | ForEach-Object {{ $_.Line }}'
+    cmd = ["powershell", "-Command", ps_cmd]
     
     try:
         # Run the command and capture output
         process = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         
-        if process.returncode not in [0, 1]:  # grep returns 1 if no matches found
+        if process.returncode != 0:
             print(f"Error: {process.stderr}")
             return None
         
@@ -69,7 +55,7 @@ def search_with_grep(file_path, search_parameter, output_file=None, use_ripgrep=
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Search log files using grep or ripgrep for maximum performance."
+        description="Search log files using PowerShell Select-String for Windows systems."
     )
     parser.add_argument(
         "search_parameter", 
@@ -84,11 +70,6 @@ def main():
         help="Output file path (optional)",
         default=None
     )
-    parser.add_argument(
-        "-r", "--ripgrep",
-        action="store_true",
-        help="Use ripgrep (rg) instead of grep if available"
-    )
     
     args = parser.parse_args()
     
@@ -98,11 +79,10 @@ def main():
         return
     
     # Run the search
-    search_with_grep(
+    search_with_powershell(
         args.file_path,
         args.search_parameter,
-        args.output,
-        use_ripgrep=args.ripgrep
+        args.output
     )
 
 if __name__ == "__main__":
