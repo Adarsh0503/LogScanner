@@ -175,19 +175,23 @@ def process_file_wrapper(args):
     """
     file_path, search_parameter, output_file, lock, use_regex, chunk_size = args
     
-    # Scan the file
-    file_path, matches = scan_file_with_mmap(
-        file_path, 
-        search_parameter, 
-        chunk_size=chunk_size,
-        use_regex=use_regex
-    )
-    
-    # Write results directly to the output file
-    if matches:
-        write_results_to_file(file_path, matches, output_file, lock)
-    
-    return len(matches)
+    try:
+        # Scan the file
+        file_path, matches = scan_file_with_mmap(
+            file_path, 
+            search_parameter, 
+            chunk_size=chunk_size,
+            use_regex=use_regex
+        )
+        
+        # Write results directly to the output file
+        if matches:
+            write_results_to_file(file_path, matches, output_file, lock)
+        
+        return len(matches)
+    except Exception as e:
+        print(f"Error processing {file_path}: {str(e)}")
+        return 0
 
 
 def scan_logs_parallel(directory_path, search_parameter, output_file=None, 
@@ -299,44 +303,15 @@ def scan_logs_parallel(directory_path, search_parameter, output_file=None,
     
     print(f"Processing with {num_processes} processes {'using regex' if use_regex else 'using string search'}")
     
-    # Process files in parallel with custom progress tracking
+    # Process files in parallel without progress reporting
     print(f"Scanning {total_files} files...")
     
-    # Create a custom progress tracker
-    processed = 0
-    progress_interval = max(1, min(100, total_files // 20))  # Update every 5% or at most every 100 files
-    start_progress_time = time.time()
-    
     with multiprocessing.Pool(processes=num_processes) as pool:
-        for _ in pool.imap_unordered(process_file_wrapper, args_list):
-            processed += 1
-            
-            # Update progress periodically
-            if processed % progress_interval == 0 or processed == total_files:
-                percent = (processed / total_files) * 100
-                elapsed = time.time() - start_time
-                files_per_sec = processed / max(1, elapsed)
-                
-                # Calculate ETA
-                if processed > 0:
-                    eta_seconds = (total_files - processed) / files_per_sec
-                    if eta_seconds > 3600:
-                        eta = f"{eta_seconds/3600:.1f}h"
-                    elif eta_seconds > 60:
-                        eta = f"{eta_seconds/60:.1f}m"
-                    else:
-                        eta = f"{eta_seconds:.0f}s"
-                else:
-                    eta = "unknown"
-                
-                # Print progress
-                print(f"\rProgress: {processed}/{total_files} files ({percent:.1f}%) | " + 
-                      f"Speed: {files_per_sec:.1f} files/sec | " +
-                      f"Matches: {TOTAL_MATCHES.value} | " +
-                      f"ETA: {eta}", end="")
-                sys.stdout.flush()
+        # Wait for the process to finish its work by collecting the result
+        # This ensures that all files are processed completely
+        result = pool.map(process_file_wrapper, args_list)
     
-    print()  # Final newline after progress tracking
+    print(f"Completed scanning all files")
     
     # Calculate statistics
     total_matches = TOTAL_MATCHES.value
@@ -363,13 +338,8 @@ def scan_logs_parallel(directory_path, search_parameter, output_file=None,
         out_file.write(f"Processing speed: {format_size(total_bytes_processed/max(1, elapsed_time))}/second\n")
         out_file.write(f"Scan completed: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
     
-    # Print summary to console
-    print(f"\nScanning complete:")
-    print(f"  Total files scanned: {total_files_processed}")
-    print(f"  Total data processed: {format_size(total_bytes_processed)}")
-    print(f"  Total matches found: {total_matches}")
-    print(f"  Elapsed time: {elapsed_time:.2f} seconds")
-    print(f"  Processing speed: {format_size(total_bytes_processed/max(1, elapsed_time))}/second")
+    # Print minimal console output
+    print(f"\nScanning complete. Found {total_matches} matches across all files.")
     print(f"Results saved to: {output_file}")
     
     return output_file
