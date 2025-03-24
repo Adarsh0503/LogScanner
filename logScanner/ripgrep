@@ -1,0 +1,109 @@
+#!/bin/bash
+# Fast Log Scanner using Ripgrep
+# This script scans log files for a specific pattern and saves results to a file
+
+# Check if arguments are provided
+if [ $# -lt 2 ]; then
+  echo "Usage: $0 <search_pattern> <log_directory> [output_file]"
+  echo "Example: $0 'transaction_id_123' /var/log/application results.log"
+  exit 1
+fi
+
+SEARCH_PATTERN="$1"
+LOG_DIRECTORY="$2"
+OUTPUT_FILE="${3:-results_${SEARCH_PATTERN}_$(date +%Y%m%d_%H%M%S).log}"
+
+# Install ripgrep if not installed
+if ! command -v rg &> /dev/null; then
+  echo "Ripgrep not found. Attempting to install..."
+  
+  # Detect OS and install
+  if command -v apt-get &> /dev/null; then
+    sudo apt-get update && sudo apt-get install -y ripgrep
+  elif command -v yum &> /dev/null; then
+    sudo yum install -y ripgrep
+  elif command -v dnf &> /dev/null; then
+    sudo dnf install -y ripgrep
+  elif command -v brew &> /dev/null; then
+    brew install ripgrep
+  else
+    echo "Could not install ripgrep automatically. Please install it manually."
+    echo "Visit: https://github.com/BurntSushi/ripgrep#installation"
+    exit 1
+  fi
+fi
+
+# Get number of CPU cores
+NUM_CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+
+echo "Starting log scan with ripgrep..."
+echo "Pattern: $SEARCH_PATTERN"
+echo "Directory: $LOG_DIRECTORY"
+echo "Output: $OUTPUT_FILE"
+echo "Using $NUM_CORES CPU cores"
+echo "-------------------------------------"
+
+# Create header for results file
+echo "Log Scan Results" > "$OUTPUT_FILE"
+echo "Pattern: $SEARCH_PATTERN" >> "$OUTPUT_FILE"
+echo "Directory: $LOG_DIRECTORY" >> "$OUTPUT_FILE"
+echo "Scan Date: $(date)" >> "$OUTPUT_FILE"
+echo "-------------------------------------" >> "$OUTPUT_FILE"
+echo "" >> "$OUTPUT_FILE"
+
+# Use ripgrep to search files
+# -j: Set number of threads
+# -l: Print only filenames with matches (first pass to identify relevant files)
+echo "Scanning log files..."
+
+# First identify all files with matches
+echo "Finding files containing matches..."
+rg -j"$NUM_CORES" -l "$SEARCH_PATTERN" --glob "*.{log,1,txt}" "$LOG_DIRECTORY" > matched_files.tmp
+
+# Count matched files
+MATCHED_FILES=$(wc -l < matched_files.tmp)
+echo "Found $MATCHED_FILES files containing matches"
+
+# Check if any matches were found
+if [ "$MATCHED_FILES" -eq 0 ]; then
+  echo "No matches found. Exiting."
+  rm matched_files.tmp
+  exit 0
+fi
+
+# Process each matched file to extract the matching lines with context
+echo "Extracting matching lines from identified files..."
+while IFS= read -r file; do
+  # Add file header to output
+  echo "===============================================================" >> "$OUTPUT_FILE"
+  echo "MATCHES FROM: $file" >> "$OUTPUT_FILE"
+  echo "===============================================================" >> "$OUTPUT_FILE"
+  echo "" >> "$OUTPUT_FILE"
+  
+  # Extract all matching lines with ripgrep
+  # --no-heading: Don't print filenames above matches
+  # -n: Show line numbers
+  # -H: Show filename for each match
+  # -A: Show N lines after match (optional, set to 0)
+  # -B: Show N lines before match (optional, set to 0)
+  rg --no-heading -n -H "$SEARCH_PATTERN" "$file" >> "$OUTPUT_FILE"
+  
+  # Add an empty line between files
+  echo -e "\n" >> "$OUTPUT_FILE"
+done < matched_files.tmp
+
+# Clean up temporary file
+rm matched_files.tmp
+
+# Count total matches
+TOTAL_MATCHES=$(grep -c "$SEARCH_PATTERN" "$OUTPUT_FILE")
+
+# Add summary to end of file
+echo "===================== SUMMARY =====================" >> "$OUTPUT_FILE"
+echo "Total files with matches: $MATCHED_FILES" >> "$OUTPUT_FILE"
+echo "Total matches found: $TOTAL_MATCHES" >> "$OUTPUT_FILE"
+echo "Scan completed: $(date)" >> "$OUTPUT_FILE"
+
+echo "Scan complete!"
+echo "Found $TOTAL_MATCHES matches in $MATCHED_FILES files"
+echo "Results saved to: $OUTPUT_FILE"
