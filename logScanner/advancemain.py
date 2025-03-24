@@ -8,7 +8,7 @@ import time
 import sys
 from datetime import datetime
 from functools import partial
-from tqdm import tqdm  # For progress bars
+# Custom progress tracking without external dependencies
 
 # Global variables for statistics
 TOTAL_MATCHES = multiprocessing.Value('i', 0)
@@ -223,7 +223,7 @@ def scan_logs_parallel(directory_path, search_parameter, output_file=None,
     
     # Set default file extensions if not provided
     if file_extensions is None:
-        file_extensions = ['.log']
+        file_extensions = ['.log', '.1', '.txt']
     
     # Generate default output filename if not provided
     if output_file is None:
@@ -254,8 +254,9 @@ def scan_logs_parallel(directory_path, search_parameter, output_file=None,
         for file in files:
             file_path = os.path.join(root, file)
             
-            # Check file extension
-            if not any(file.endswith(ext) for ext in file_extensions):
+            # Check file extension - allow for both regular extensions and numeric extensions
+            if not (any(file.endswith(ext) for ext in file_extensions) or 
+                    (os.path.splitext(file)[1].isdigit() and os.path.splitext(os.path.splitext(file)[0])[1] in file_extensions)):
                 continue
             
             # Check if it's a regular file
@@ -298,15 +299,44 @@ def scan_logs_parallel(directory_path, search_parameter, output_file=None,
     
     print(f"Processing with {num_processes} processes {'using regex' if use_regex else 'using string search'}")
     
-    # Process files in parallel with progress bar
+    # Process files in parallel with custom progress tracking
+    print(f"Scanning {total_files} files...")
+    
+    # Create a custom progress tracker
+    processed = 0
+    progress_interval = max(1, min(100, total_files // 20))  # Update every 5% or at most every 100 files
+    start_progress_time = time.time()
+    
     with multiprocessing.Pool(processes=num_processes) as pool:
-        # Use imap_unordered for better performance and to show progress
-        list(tqdm(
-            pool.imap_unordered(process_file_wrapper, args_list),
-            total=total_files,
-            desc="Scanning files",
-            unit="file"
-        ))
+        for _ in pool.imap_unordered(process_file_wrapper, args_list):
+            processed += 1
+            
+            # Update progress periodically
+            if processed % progress_interval == 0 or processed == total_files:
+                percent = (processed / total_files) * 100
+                elapsed = time.time() - start_time
+                files_per_sec = processed / max(1, elapsed)
+                
+                # Calculate ETA
+                if processed > 0:
+                    eta_seconds = (total_files - processed) / files_per_sec
+                    if eta_seconds > 3600:
+                        eta = f"{eta_seconds/3600:.1f}h"
+                    elif eta_seconds > 60:
+                        eta = f"{eta_seconds/60:.1f}m"
+                    else:
+                        eta = f"{eta_seconds:.0f}s"
+                else:
+                    eta = "unknown"
+                
+                # Print progress
+                print(f"\rProgress: {processed}/{total_files} files ({percent:.1f}%) | " + 
+                      f"Speed: {files_per_sec:.1f} files/sec | " +
+                      f"Matches: {TOTAL_MATCHES.value} | " +
+                      f"ETA: {eta}", end="")
+                sys.stdout.flush()
+    
+    print()  # Final newline after progress tracking
     
     # Calculate statistics
     total_matches = TOTAL_MATCHES.value
@@ -384,8 +414,8 @@ def main():
     parser.add_argument(
         "-e", "--extensions",
         nargs="+",
-        default=[".log"],
-        help="File extensions to scan (default: .log)"
+        default=[".log", ".1", ".txt"],
+        help="File extensions to scan (default: .log, .1, .txt)"
     )
     parser.add_argument(
         "-s", "--follow-symlinks",
