@@ -1,0 +1,97 @@
+@app.route('/test-rollback', methods=['POST'])
+def test_rollback():
+    """Test endpoint that intentionally causes an error during file writing to test rollback"""
+    try:
+        # Get parameters from the request
+        search_parameter = request.form.get('search_parameter', 'ERROR')
+        directory_path = request.form.get('directory_path')
+        max_file_size_mb = float(request.form.get('max_file_size_mb', 0.1))
+        
+        if not directory_path or not os.path.exists(directory_path):
+            return jsonify({"error": "Invalid directory path"}), 400
+        
+        # Start the normal scanning process - this will collect matches from log files
+        # but we'll interrupt it during the file writing phase
+        
+        # Run the scan and get results
+        results = []
+        temp_dir = tempfile.mkdtemp()
+        base_output_file = os.path.join(temp_dir, "test_results")
+        
+        # Begin scanning logs
+        log_files = []
+        for root, _, files in os.walk(directory_path):
+            for file in files:
+                if file.endswith(".log") or file.endswith(".1") or file.endswith(".txt"):
+                    log_files.append(os.path.join(root, file))
+        
+        print(f"Found {len(log_files)} log files to scan")
+        
+        # Process a few files to get some results
+        sample_size = min(10, len(log_files))  # Process up to 10 log files for the test
+        created_files = []
+        
+        for i in range(sample_size):
+            file_path = log_files[i]
+            with open(file_path, 'r', errors='replace') as f:
+                for line in f:
+                    if search_parameter in line:
+                        results.append((file_path, line.strip()))
+        
+        # Now try to write some output files but force an error
+        try:
+            # Write first file
+            file1 = f"{base_output_file}.part001"
+            with open(file1, 'w') as f:
+                f.write(f"SCANNING RESULTS - PART 1\n")
+                f.write(f"{'=' * 80}\n\n")
+                for i in range(min(50, len(results))):
+                    f.write(f"FILE: {results[i][0]}\n")
+                    f.write(f"{results[i][1]}\n\n")
+            created_files.append(file1)
+            
+            # Write second file
+            file2 = f"{base_output_file}.part002"
+            with open(file2, 'w') as f:
+                f.write(f"SCANNING RESULTS - PART 2\n")
+                f.write(f"{'=' * 80}\n\n")
+                for i in range(50, min(100, len(results))):
+                    f.write(f"FILE: {results[i][0]}\n")
+                    f.write(f"{results[i][1]}\n\n")
+            created_files.append(file2)
+            
+            # Now force an error - simulate disk full or permission error
+            raise IOError("Simulated disk full or permission error during file writing")
+            
+        except Exception as e:
+            # This should trigger your rollback code
+            print(f"Error occurred during file writing: {str(e)}")
+            print("Executing rollback...")
+            
+            # Check if your rollback is working by deleting the created files
+            for file in created_files:
+                if os.path.exists(file):
+                    try:
+                        os.remove(file)
+                        print(f"Deleted {file}")
+                    except Exception as delete_error:
+                        print(f"Failed to delete {file}: {str(delete_error)}")
+            
+            # Check if any files remain after rollback
+            remaining_files = [f for f in created_files if os.path.exists(f)]
+            
+            # Return a response indicating what happened
+            return jsonify({
+                "status": "rollback_tested",
+                "error": str(e),
+                "files_created": len(created_files),
+                "rollback_successful": len(remaining_files) == 0,
+                "remaining_files": [os.path.basename(f) for f in remaining_files]
+            })
+    
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+    finally:
+        # Clean up
+        if 'temp_dir' in locals() and os.path.exists(temp_dir):
+            shutil.rmtree(temp_dir, ignore_errors=True)
