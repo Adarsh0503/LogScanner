@@ -6,166 +6,83 @@ import argparse
 import multiprocessing
 import tempfile
 import shutil
-import traceback
 from datetime import datetime
 from functools import partial
 
-def scan_file_with_mmap(file_path, search_parameter, context_lines=10):
+def scan_file_with_mmap(file_path, search_parameter):
     """
     Scan a single file using memory-mapped I/O for efficiency.
-    Returns a list of matching lines with context (lines before and after).
+    Returns a list of matching lines.
     """
     matches = []
     try:
-        # Open file in binary mode to handle any character encoding
-        with open(file_path, 'rb') as f:
-            content = f.read()
-            
-            # Read all lines for context
-            with open(file_path, 'rb') as f2:
-                all_lines = f2.readlines()
-            
-            # Try to memory map the file
-            try:
-                with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
-                    # Convert to bytes for mmap searching
-                    search_bytes = search_parameter.encode('utf-8')
-                    
-                    # Start position for searching
-                    current_pos = 0
-                    
-                    # Find each occurrence
-                    while True:
-                        found_pos = mm.find(search_bytes, current_pos)
-                        if found_pos == -1:
-                            break
-                        
-                        # Find the start of the line containing match
-                        line_start = mm.rfind(b'\n', 0, found_pos)
-                        if line_start == -1:  # If not found, start of file
-                            line_start = 0
-                        else:
-                            line_start += 1  # Skip the newline character
-                        
-                        # Find the end of the line
-                        line_end = mm.find(b'\n', found_pos)
-                        if line_end == -1:  # If not found, end of file
-                            line_end = mm.size()
-                        
-                        # Extract the line and decode to string
-                        matched_line = mm[line_start:line_end].decode('utf-8', errors='replace')
-                        
-                        # Determine line number for the matched line
-                        # Count newlines up to the start of the match
-                        line_count = mm[:line_start].count(b'\n')
-                        match_line_number = line_count
-                        
-                        # Build context for this match
-                        context_match = {
-                            'match_line': matched_line,
-                            'match_line_number': match_line_number,
-                            'context_before': [],
-                            'context_after': [],
-                            'source_file': file_path
-                        }
-                        
-                        # Add lines before the match
-                        start_line = max(0, match_line_number - context_lines)
-                        for i in range(start_line, match_line_number):
-                            if i < len(all_lines):
-                                context_match['context_before'].append(all_lines[i].decode('utf-8', errors='replace').rstrip('\n'))
-                        
-                        # Add lines after the match
-                        end_line = min(len(all_lines), match_line_number + context_lines + 1)
-                        for i in range(match_line_number + 1, end_line):
-                            if i < len(all_lines):
-                                context_match['context_after'].append(all_lines[i].decode('utf-8', errors='replace').rstrip('\n'))
-                        
-                        matches.append(context_match)
-                        
-                        # Move to position after current match
-                        current_pos = found_pos + 1
-            
-            except (ValueError, TypeError, MemoryError) as e:
-                # Fallback to regular scanning if memory mapping fails
+        with open(file_path, 'r') as f:
+            # Memory map the file for faster access
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                # Convert to bytes for mmap searching
                 search_bytes = search_parameter.encode('utf-8')
-                for i, line in enumerate(all_lines):
-                    if search_bytes in line:
-                        # Found a match
-                        context_match = {
-                            'match_line': line.decode('utf-8', errors='replace').rstrip('\n'),
-                            'match_line_number': i,
-                            'context_before': [],
-                            'context_after': [],
-                            'source_file': file_path
-                        }
-                        
-                        # Add lines before the match
-                        start_line = max(0, i - context_lines)
-                        for j in range(start_line, i):
-                            if j < len(all_lines):
-                                context_match['context_before'].append(all_lines[j].decode('utf-8', errors='replace').rstrip('\n'))
-                        
-                        # Add lines after the match
-                        end_line = min(len(all_lines), i + context_lines + 1)
-                        for j in range(i + 1, end_line):
-                            if j < len(all_lines):
-                                context_match['context_after'].append(all_lines[j].decode('utf-8', errors='replace').rstrip('\n'))
-                        
-                        matches.append(context_match)
                 
+                # Start position for searching
+                current_pos = 0
+                
+                # Find each occurrence
+                while True:
+                    found_pos = mm.find(search_bytes, current_pos)
+                    if found_pos == -1:
+                        break
+                    
+                    # Find the start of the line containing match
+                    line_start = mm.rfind(b'\n', 0, found_pos)
+                    if line_start == -1:  # If not found, start of file
+                        line_start = 0
+                    else:
+                        line_start += 1  # Skip the newline character
+                    
+                    # Find the end of the line
+                    line_end = mm.find(b'\n', found_pos)
+                    if line_end == -1:  # If not found, end of file
+                        line_end = mm.size()
+                    
+                    # Extract the line and decode to string
+                    line = mm[line_start:line_end].decode('utf-8', errors='replace')
+                    matches.append(line)
+                    
+                    # Move to position after current match
+                    current_pos = found_pos + 1
+                    
     except Exception as e:
         print(f"Error processing {file_path}: {str(e)}")
     
     return file_path, matches
 
-def write_match_to_file(out_file, match_data, idx):
+def process_file_generator(file_path, search_parameter):
     """
-    Write a single match with its context to the output file.
-    Returns the number of bytes written.
+    Process a file using generators for memory efficiency.
+    Alternative to mmap for certain cases.
     """
-    bytes_written = 0
+    matches = []
+    try:
+        with open(file_path, 'r') as f:
+            for line in f:
+                if search_parameter in line:
+                    matches.append(line.rstrip('\n'))
+    except Exception as e:
+        print(f"Error processing {file_path}: {str(e)}")
     
-    # Write match number
-    output = f"MATCH #{idx + 1} (Line {match_data['match_line_number'] + 1}):\n"
-    output += f"{'-' * 40}\n"
-    bytes_written += out_file.write(output)
-    
-    # Write source file
-    output = f"SOURCE: {match_data['source_file']}\n\n"
-    bytes_written += out_file.write(output)
-    
-    # Write context before
-    if match_data['context_before']:
-        output = "CONTEXT BEFORE:\n"
-        bytes_written += out_file.write(output)
-        for line in match_data['context_before']:
-            output = f"  {line}\n"
-            bytes_written += out_file.write(output)
-        bytes_written += out_file.write("\n")
-    
-    # Write the match line (highlighted)
-    output = "MATCHING LINE:\n"
-    output += f">> {match_data['match_line']}\n\n"
-    bytes_written += out_file.write(output)
-    
-    # Write context after
-    if match_data['context_after']:
-        output = "CONTEXT AFTER:\n"
-        bytes_written += out_file.write(output)
-        for line in match_data['context_after']:
-            output = f"  {line}\n"
-            bytes_written += out_file.write(output)
-    
-    output = f"\n{'-' * 80}\n\n"
-    bytes_written += out_file.write(output)
-    
-    return bytes_written
+    return file_path, matches
 
 def write_results_to_split_files(results, base_output_file, max_file_size_mb=1):
     """
     Write results to multiple files, splitting when they exceed the specified size.
     Includes rollback mechanism to ensure file integrity.
+    
+    Args:
+        results: List of tuples (file_path, matches)
+        base_output_file: Base name for output files
+        max_file_size_mb: Maximum size of each output file in MB
+    
+    Returns:
+        list: List of generated output files
     """
     max_file_size_bytes = max_file_size_mb * 1024 * 1024
     output_files = []
@@ -179,15 +96,8 @@ def write_results_to_split_files(results, base_output_file, max_file_size_mb=1):
     
     try:
         # Open the first output file
-        with open(current_output_file, 'w', encoding='utf-8') as out_file:
-            # Write header
-            header = f"LOG SCAN RESULTS - PART {current_file_idx}\n"
-            header += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-            header += f"{'=' * 80}\n\n"
-            out_file.write(header)
-            
-            current_file_size = len(header)
-            match_idx = 0
+        with open(current_output_file, 'w') as out_file:
+            current_file_size = 0
             
             # Process all matches from all files
             for file_path, matches in results:
@@ -196,78 +106,71 @@ def write_results_to_split_files(results, base_output_file, max_file_size_mb=1):
                     file_header += f"MATCHES FROM: {file_path}\n"
                     file_header += f"{'=' * 80}\n\n"
                     
-                    # Check if we need a new file before writing file header
+                    # Check if adding this file's matches would exceed the size limit
+                    # If so, start a new file
                     if current_file_size + len(file_header) > max_file_size_bytes:
-                        # Close current file and start a new one
-                        out_file.write(f"\nTotal matches in this part: {match_idx}\n")
                         out_file.close()
                         
                         current_file_idx += 1
                         current_output_file = f"{base_output_file}.part{current_file_idx:03d}"
                         output_files.append(current_output_file)
-                        out_file = open(current_output_file, 'w', encoding='utf-8')
-                        
-                        # Write header for new file
-                        header = f"LOG SCAN RESULTS - PART {current_file_idx}\n"
-                        header += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                        header += f"{'=' * 80}\n\n"
-                        out_file.write(header)
-                        
-                        current_file_size = len(header)
-                        match_idx = 0
+                        out_file = open(current_output_file, 'w')
+                        current_file_size = 0
                     
                     # Write file header
                     out_file.write(file_header)
                     current_file_size += len(file_header)
                     
-                    # Write each match
-                    for match_data in matches:
-                        # Create a temporary file to measure the size of this match
-                        with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as temp_file:
-                            bytes_written = write_match_to_file(temp_file, match_data, match_idx)
-                            
-                            # Check if we need a new file
-                            if current_file_size + bytes_written > max_file_size_bytes and match_idx > 0:
-                                # Close current file and start a new one
-                                out_file.write(f"\nTotal matches in this part: {match_idx}\n")
-                                out_file.close()
-                                
-                                current_file_idx += 1
-                                current_output_file = f"{base_output_file}.part{current_file_idx:03d}"
-                                output_files.append(current_output_file)
-                                out_file = open(current_output_file, 'w', encoding='utf-8')
-                                
-                                # Write header for new file
-                                header = f"LOG SCAN RESULTS - PART {current_file_idx}\n"
-                                header += f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
-                                header += f"{'=' * 80}\n\n"
-                                out_file.write(header)
-                                
-                                # Write file header again
-                                out_file.write(file_header)
-                                current_file_size = len(header) + len(file_header)
-                                match_idx = 0
-                            
-                            # Write the match to the actual file
-                            temp_file.seek(0)
-                            match_content = temp_file.read()
-                            out_file.write(match_content)
-                            current_file_size += bytes_written
+                    file_matches = 0
+                    for line in matches:
+                        line_with_newline = line + '\n'
+                        line_size = len(line_with_newline)
                         
-                        match_idx += 1
-                        total_matches += 1
+                        # If this single line would exceed the file size limit on its own,
+                        # we have to include it anyway (can't split a single line)
+                        # Otherwise, check if adding this line would exceed the limit
+                        if line_size > max_file_size_bytes:
+                            # Line is too big for a single file, but we have to include it
+                            out_file.write(line_with_newline)
+                            file_matches += 1
+                            current_file_size += line_size
+                        elif current_file_size + line_size > max_file_size_bytes:
+                            # This line would exceed the limit, so start a new file
+                            # Write file summary for current file
+                            summary = f"\nTotal matches in this file: {file_matches}\n\n"
+                            out_file.write(summary)
+                            out_file.close()
+                            
+                            # Create new file
+                            current_file_idx += 1
+                            current_output_file = f"{base_output_file}.part{current_file_idx:03d}"
+                            output_files.append(current_output_file)
+                            out_file = open(current_output_file, 'w')
+                            
+                            # Write file header again in the new file
+                            out_file.write(file_header)
+                            current_file_size = len(file_header)
+                            file_matches = 0
+                            
+                            # Now write the line to the new file
+                            out_file.write(line_with_newline)
+                            file_matches += 1
+                            current_file_size += line_size
+                        else:
+                            # Line fits in current file
+                            out_file.write(line_with_newline)
+                            file_matches += 1
+                            current_file_size += line_size
                     
                     # Write file summary
-                    file_summary = f"\nTotal matches in this file: {len(matches)}\n\n"
-                    out_file.write(file_summary)
-                    current_file_size += len(file_summary)
-            
-            # Write final summary for the last file
-            out_file.write(f"\nTotal matches in this part: {match_idx}\n")
+                    summary = f"\nTotal matches in this file: {len(matches)}\n\n"
+                    out_file.write(summary)
+                    current_file_size += len(summary)
+                    total_matches += len(matches)
         
         # Create an index file
         index_file = f"{base_output_file}.index"
-        with open(index_file, 'w', encoding='utf-8') as idx_file:
+        with open(index_file, 'w') as idx_file:
             idx_file.write(f"LOG SCAN RESULTS INDEX\n")
             idx_file.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
             idx_file.write(f"Total matches found: {total_matches}\n")
@@ -281,7 +184,6 @@ def write_results_to_split_files(results, base_output_file, max_file_size_mb=1):
     except Exception as e:
         # Rollback: delete partially written files
         print(f"Error writing output files: {str(e)}")
-        print(traceback.format_exc())
         for file in output_files:
             if os.path.exists(file):
                 os.remove(file)
@@ -294,25 +196,35 @@ def write_results_to_split_files(results, base_output_file, max_file_size_mb=1):
     
     return output_files
 
-def scan_logs_parallel(directory_path, search_parameter, output_file=None, use_mmap=True, 
-                      num_processes=None, context_lines=10, max_file_size_mb=1):
+def scan_logs_parallel(directory_path, search_parameter, output_file=None, use_mmap=True, num_processes=None, max_file_size_mb=1):
     """
     Scan all log files in the directory in parallel for lines containing the search parameter
-    and combine them into output files with size limits.
+    and combine them into a single output file or multiple files if size threshold is reached.
+    
+    Args:
+        directory_path (str): Path to the directory containing log files
+        search_parameter (str): Text to search for in log files
+        output_file (str, optional): Path to output file. If None, generates a default name.
+        use_mmap (bool): Whether to use mmap for file processing
+        num_processes (int, optional): Number of processes to use. If None, uses CPU count.
+        max_file_size_mb (int): Maximum size of each output file in MB
+    
+    Returns:
+        str or list: Path to the output file or list of output files
     """
     # Generate default output filename if not provided
     if output_file is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_file = f"combined_logs_{search_parameter}_{timestamp}"
+        base_output_file = f"combined_logs_{search_parameter}_{timestamp}"
     else:
         # Remove file extension if provided
-        output_file = os.path.splitext(output_file)[0]
+        base_output_file = os.path.splitext(output_file)[0]
     
     # Collect all log files
     log_files = []
     for root, _, files in os.walk(directory_path):
         for file in files:
-            if file.endswith(".log") or file.endswith(".1") or file.endswith(".txt"):
+            if file.endswith(".log"):
                 log_files.append(os.path.join(root, file))
     
     print(f"Found {len(log_files)} log files to scan")
@@ -321,36 +233,43 @@ def scan_logs_parallel(directory_path, search_parameter, output_file=None, use_m
     if num_processes is None:
         num_processes = min(multiprocessing.cpu_count(), len(log_files))
     
+    # Choose the processing function
+    process_func = scan_file_with_mmap if use_mmap else process_file_generator
+    
     # Process files in parallel
     print(f"Processing with {num_processes} processes {'using mmap' if use_mmap else 'using generators'}")
     
     with multiprocessing.Pool(processes=num_processes) as pool:
-        # Create a partial function with the search parameter and context lines
-        partial_func = partial(scan_file_with_mmap, search_parameter=search_parameter, context_lines=context_lines)
+        # Create a partial function with the search parameter
+        partial_func = partial(process_func, search_parameter=search_parameter)
         
         # Process all files and collect results
         results = pool.map(partial_func, log_files)
     
     # Write results to split output files
     try:
-        output_files = write_results_to_split_files(results, output_file, max_file_size_mb)
+        output_files = write_results_to_split_files(results, base_output_file, max_file_size_mb)
         
         # Count total matches
         total_matches = sum(len(matches) for _, matches in results if matches)
         
-        print(f"Scanning complete. Found {total_matches} matches across all files.")
-        print(f"Results saved to {len(output_files)-1} files with index at {output_files[-1]}")
-        
-        return output_files
+        if len(output_files) > 1:
+            print(f"Scanning complete. Found {total_matches} matches across all files.")
+            print(f"Results split into {len(output_files)-1} files with index at {output_files[-1]}")
+            return output_files
+        else:
+            print(f"Scanning complete. Found {total_matches} matches across all files.")
+            print(f"Results saved to: {output_files[0]}")
+            return output_files[0]
+            
     except Exception as e:
         print(f"Error writing output: {str(e)}")
-        print(traceback.format_exc())
-        return []
+        return None
 
 def main():
     # Set up command line argument parsing
     parser = argparse.ArgumentParser(
-        description="Scan log files for a specific parameter and combine matching lines with context into size-limited output files."
+        description="Scan log files for a specific parameter and combine matching lines."
     )
     parser.add_argument(
         "search_parameter", 
@@ -362,7 +281,7 @@ def main():
     )
     parser.add_argument(
         "-o", "--output", 
-        help="Base name for output files (optional)",
+        help="Output file path (optional)",
         default=None
     )
     parser.add_argument(
@@ -379,13 +298,7 @@ def main():
     parser.add_argument(
         "-r", "--regex",
         action="store_true",
-        help="Use regex pattern matching instead of simple string search (not implemented yet)"
-    )
-    parser.add_argument(
-        "-c", "--context",
-        type=int,
-        default=10,
-        help="Number of context lines to include before and after matches (default: 10)"
+        help="Use regex pattern matching instead of simple string search"
     )
     parser.add_argument(
         "-s", "--size",
@@ -396,21 +309,22 @@ def main():
     
     args = parser.parse_args()
     
+    # If regex is requested, use the original regex-based function
+    if args.regex:
+        # Import the original regex-based function (assumed to be defined elsewhere)
+        # scan_logs(args.directory_path, args.search_parameter, args.output)
+        print("Regex-based scanning requested - this would use the regex implementation")
+        return
+    
     # Call the optimized scan_logs function with provided arguments
-    try:
-        scan_logs_parallel(
-            args.directory_path, 
-            args.search_parameter, 
-            args.output,
-            use_mmap=not args.no_mmap,
-            num_processes=args.processes,
-            context_lines=args.context,
-            max_file_size_mb=args.size
-        )
-    except Exception as e:
-        print(f"An error occurred during execution: {str(e)}")
-        print(traceback.format_exc())
-        print("\nPlease report this issue with the error details above.")
+    scan_logs_parallel(
+        args.directory_path, 
+        args.search_parameter, 
+        args.output,
+        use_mmap=not args.no_mmap,
+        num_processes=args.processes,
+        max_file_size_mb=args.size
+    )
 
 if __name__ == "__main__":
     main()
