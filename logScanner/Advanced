@@ -22,13 +22,15 @@ def scan_file_with_mmap(file_path, search_parameter, context_lines=10):
     """
     matches = []
     try:
-        with open(file_path, 'r') as f:
+        # Use error handling for file opening to handle encoding issues
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
             # First, read all lines of the file to build context
             all_lines = f.readlines()
             
             # Memory map the file for faster searching
             f.seek(0)  # Reset file position
-            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+            try:
+                with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                 # Convert to bytes for mmap searching
                 search_bytes = search_parameter.encode('utf-8')
                 
@@ -86,6 +88,38 @@ def scan_file_with_mmap(file_path, search_parameter, context_lines=10):
                     
                     # Move to position after current match
                     current_pos = found_pos + 1
+            except ValueError as e:
+                # Handle the case where memory mapping fails
+                print(f"Warning: Memory mapping failed for {file_path}, falling back to regular file reading")
+                # Fall back to line-by-line processing
+                f.seek(0)
+                line_number = 0
+                for line in f:
+                    if search_parameter in line:
+                        # Build context for this match
+                        context_match = {
+                            'match_line': line.rstrip('\n'),
+                            'match_line_number': line_number,
+                            'context_before': [],
+                            'context_after': [],
+                            'source_file': file_path
+                        }
+                        
+                        # Add lines before the match (from our previously read lines)
+                        start_line = max(0, line_number - context_lines)
+                        for i in range(start_line, line_number):
+                            if i < len(all_lines):
+                                context_match['context_before'].append(all_lines[i].rstrip('\n'))
+                        
+                        # Add lines after the match
+                        end_line = min(len(all_lines), line_number + context_lines + 1)
+                        for i in range(line_number + 1, end_line):
+                            if i < len(all_lines):
+                                context_match['context_after'].append(all_lines[i].rstrip('\n'))
+                        
+                        matches.append(context_match)
+                    
+                    line_number += 1
     
     except Exception as e:
         print(f"Error processing {file_path}: {str(e)}")
@@ -100,7 +134,8 @@ def process_file_generator(file_path, search_parameter, context_lines=10):
     """
     matches = []
     try:
-        with open(file_path, 'r') as f:
+        # Use error handling for file opening to handle encoding issues
+        with open(file_path, 'r', encoding='utf-8', errors='replace') as f:
             # First, read all lines of the file to build context
             all_lines = list(f)
             
@@ -314,6 +349,63 @@ def write_results_to_split_files(results, base_output_file, max_file_size_mb=1):
     
     return output_files
 
+def handle_binary_file(file_path, search_parameter, context_lines=10):
+    """
+    Handle files that might contain binary data or encoding issues.
+    Uses binary mode and works with bytes directly.
+    """
+    matches = []
+    try:
+        # Read file in binary mode
+        with open(file_path, 'rb') as f:
+            # Read all lines
+            binary_lines = f.readlines()
+            
+            # Convert search parameter to bytes
+            search_bytes = search_parameter.encode('utf-8')
+            
+            # Search for matches
+            for i, binary_line in enumerate(binary_lines):
+                if search_bytes in binary_line:
+                    # Try to decode line, replacing problematic characters
+                    try:
+                        match_line = binary_line.decode('utf-8', errors='replace').rstrip('\n')
+                    except:
+                        match_line = binary_line.decode('latin-1', errors='replace').rstrip('\n')
+                    
+                    context_match = {
+                        'match_line': match_line,
+                        'match_line_number': i,
+                        'context_before': [],
+                        'context_after': [],
+                        'source_file': file_path
+                    }
+                    
+                    # Add lines before the match
+                    start_line = max(0, i - context_lines)
+                    for j in range(start_line, i):
+                        try:
+                            before_line = binary_lines[j].decode('utf-8', errors='replace').rstrip('\n')
+                        except:
+                            before_line = binary_lines[j].decode('latin-1', errors='replace').rstrip('\n')
+                        context_match['context_before'].append(before_line)
+                    
+                    # Add lines after the match
+                    end_line = min(len(binary_lines), i + context_lines + 1)
+                    for j in range(i + 1, end_line):
+                        try:
+                            after_line = binary_lines[j].decode('utf-8', errors='replace').rstrip('\n')
+                        except:
+                            after_line = binary_lines[j].decode('latin-1', errors='replace').rstrip('\n')
+                        context_match['context_after'].append(after_line)
+                    
+                    matches.append(context_match)
+    
+    except Exception as e:
+        print(f"Error processing {file_path}: {str(e)}")
+    
+    return file_path, matches
+
 def scan_logs_parallel(directory_path, search_parameter, output_file=None, use_mmap=True, 
                       num_processes=None, context_lines=10, max_file_size_mb=1):
     """
@@ -354,99 +446,8 @@ def scan_logs_parallel(directory_path, search_parameter, output_file=None, use_m
         num_processes = min(multiprocessing.cpu_count(), len(log_files))
     
     # Choose the processing function
-    process_func = scan_file_with_mmap if use_mmap else process_file_generator
-    
-    # Process files in parallel
-    print(f"Processing with {num_processes} processes {'using mmap' if use_mmap else 'using generators'}")
-    
-    with multiprocessing.Pool(processes=num_processes) as pool:
-        # Create a partial function with the search parameter and context lines
-        partial_func = partial(process_func, search_parameter=search_parameter, context_lines=context_lines)
-        
-        # Process all files and collect results
-        results = pool.map(partial_func, log_files)
-    
-    # Write results to split output files
-    try:
-        output_files = write_results_to_split_files(results, output_file, max_file_size_mb)
-        
-        # Count total matches
-        total_matches = sum(len(matches) for _, matches in results if matches)
-        
-        print(f"Scanning complete. Found {total_matches} matches across all files.")
-        print(f"Results saved to {len(output_files)-1} files with index at {output_files[-1]}")
-        
-        return output_files
-    except Exception as e:
-        print(f"Error writing output: {str(e)}")
-        return []
-
-def main():
-    # Set up command line argument parsing
-    parser = argparse.ArgumentParser(
-        description="Scan log files for a specific parameter and combine matching lines with context into size-limited output files."
-    )
-    parser.add_argument(
-        "search_parameter", 
-        help="Text to search for in the log files"
-    )
-    parser.add_argument(
-        "directory_path", 
-        help="Path to the directory containing log files"
-    )
-    parser.add_argument(
-        "-o", "--output", 
-        help="Base name for output files (optional)",
-        default=None
-    )
-    parser.add_argument(
-        "--no-mmap",
-        action="store_true",
-        help="Disable memory-mapped I/O (use for very large files or limited memory)"
-    )
-    parser.add_argument(
-        "-p", "--processes",
-        type=int,
-        default=None,
-        help="Number of processes to use (default: number of CPU cores)"
-    )
-    parser.add_argument(
-        "-r", "--regex",
-        action="store_true",
-        help="Use regex pattern matching instead of simple string search"
-    )
-    parser.add_argument(
-        "-c", "--context",
-        type=int,
-        default=10,
-        help="Number of context lines to include before and after matches (default: 10)"
-    )
-    parser.add_argument(
-        "-s", "--size",
-        type=int,
-        default=1,
-        help="Maximum size of each output file in MB (default: 1)"
-    )
-    
-    args = parser.parse_args()
-    
-    # If regex is requested, use the original regex-based function
-    if args.regex:
-        # Import the original regex-based function (assumed to be defined elsewhere)
-        # scan_logs(args.directory_path, args.search_parameter, args.output)
-        print("Regex-based scanning requested - this would use the regex implementation")
-        return
-    
-    # Call the optimized scan_logs function with provided arguments
-    scan_logs_parallel(
-        args.directory_path, 
-        args.search_parameter, 
-        args.output,
-        use_mmap=not args.no_mmap,
-        num_processes=args.processes,
-        context_lines=args.context,
-        max_file_size_mb=args.size
-    )
-
-if __name__ == "__main__":
-    main()
+    # Default to the binary handler as a fallback
+    def process_with_fallback(file_path, search_parameter, context_lines=10):
+        try:
+            if use_mmap:
+                return scan_file_with_mmap(file_path, sea
