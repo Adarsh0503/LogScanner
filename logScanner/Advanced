@@ -450,4 +450,106 @@ def scan_logs_parallel(directory_path, search_parameter, output_file=None, use_m
     def process_with_fallback(file_path, search_parameter, context_lines=10):
         try:
             if use_mmap:
-                return scan_file_with
+                return scan_file_with_mmap(file_path, search_parameter, context_lines)
+            else:
+                return process_file_generator(file_path, search_parameter, context_lines)
+        except UnicodeDecodeError:
+            print(f"Encoding error with {file_path}, trying binary mode...")
+            return handle_binary_file(file_path, search_parameter, context_lines)
+    
+    process_func = process_with_fallback
+    
+    # Process files in parallel
+    print(f"Processing with {num_processes} processes {'using mmap' if use_mmap else 'using generators'}")
+    
+    with multiprocessing.Pool(processes=num_processes) as pool:
+        # Create a partial function with the search parameter and context lines
+        partial_func = partial(process_func, search_parameter=search_parameter, context_lines=context_lines)
+        
+        # Process all files and collect results
+        results = pool.map(partial_func, log_files)
+    
+    # Write results to split output files
+    try:
+        output_files = write_results_to_split_files(results, output_file, max_file_size_mb)
+        
+        # Count total matches
+        total_matches = sum(len(matches) for _, matches in results if matches)
+        
+        print(f"Scanning complete. Found {total_matches} matches across all files.")
+        print(f"Results saved to {len(output_files)-1} files with index at {output_files[-1]}")
+        
+        return output_files
+    except Exception as e:
+        print(f"Error writing output: {str(e)}")
+        return []
+
+def main():
+    # Set up command line argument parsing
+    parser = argparse.ArgumentParser(
+        description="Scan log files for a specific parameter and combine matching lines with context into size-limited output files."
+    )
+    parser.add_argument(
+        "search_parameter", 
+        help="Text to search for in the log files"
+    )
+    parser.add_argument(
+        "directory_path", 
+        help="Path to the directory containing log files"
+    )
+    parser.add_argument(
+        "-o", "--output", 
+        help="Base name for output files (optional)",
+        default=None
+    )
+    parser.add_argument(
+        "--no-mmap",
+        action="store_true",
+        help="Disable memory-mapped I/O (use for very large files or limited memory)"
+    )
+    parser.add_argument(
+        "-p", "--processes",
+        type=int,
+        default=None,
+        help="Number of processes to use (default: number of CPU cores)"
+    )
+    parser.add_argument(
+        "-r", "--regex",
+        action="store_true",
+        help="Use regex pattern matching instead of simple string search"
+    )
+    parser.add_argument(
+        "-c", "--context",
+        type=int,
+        default=10,
+        help="Number of context lines to include before and after matches (default: 10)"
+    )
+    parser.add_argument(
+        "-s", "--size",
+        type=int,
+        default=1,
+        help="Maximum size of each output file in MB (default: 1)"
+    )
+    
+    args = parser.parse_args()
+    
+    # If regex is requested, use the original regex-based function
+    if args.regex:
+        # Import the original regex-based function (assumed to be defined elsewhere)
+        # scan_logs(args.directory_path, args.search_parameter, args.output)
+        print("Regex-based scanning requested - this would use the regex implementation")
+        return
+    
+    # Call the optimized scan_logs function with provided arguments
+    scan_logs_parallel(
+        args.directory_path, 
+        args.search_parameter, 
+        args.output,
+        use_mmap=not args.no_mmap,
+        num_processes=args.processes,
+        context_lines=args.context,
+        max_file_size_mb=args.size
+    )
+
+if __name__ == "__main__":
+    main()
