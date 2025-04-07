@@ -17,6 +17,6 @@ python script.py "search term" /path/to/directory
 python script.py "search term" /path/to/directory --no-mmap
 
 The memory mapping approach will typically be faster for most modern systems, but the line-by-line approach might be more reliable on systems with limited memory.
-Claude can make mistakes. Please double-check responses.
+
 
 
