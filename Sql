@@ -1,0 +1,420 @@
+/* Approach: Using explicit JOINs, UNION to optimize OR conditions, 
+   and placing most restrictive conditions first */
+
+(
+  /* First query for exact CASE_NUM match */
+  SELECT 
+    func.FUNCTION_NAME AS FUNCTION,
+    txn.product_type AS productType,
+    txn.PRODUCT_ID AS productId,
+    txn.REQ_DATE AS requestDate,
+    txn.REQ_DATE_TIME AS requestDateTimeStr,
+    txn.req_time AS requestTime,
+    txn.COUNTRYCODE AS country,
+    txn.DOC_STAGE AS stage,
+    txn.ID AS txnRefNumber,
+    txn.sub_stage AS substage,
+    txn.channel AS channel,
+    txn.customer_name AS customerName,
+    COALESCE(NULLIF(txn.cif_id, ''), txn.customerid) AS ciftd,
+    txn.branch_code AS branchCode,
+    txn.originals AS originals,
+    txn.bu AS bu,
+    txn.priority AS priority,
+    txn.branch_name AS branchName,
+    txn.status AS STATUS,
+    txn.sub_status AS substatus,
+    txn.assignee AS assignee,
+    txn.sub_product_type AS subProductType,
+    txn.CASE_NUM AS caseNum,
+    txn.DOC_REF_NUM AS docRefNum,
+    CASE WHEN st.stage_name LIKE '%RPA%' THEN 'RPA' ELSE st.stage_name END AS stageDesc,
+    txn.skill AS skill,
+    txn.segment AS segment,
+    txn.biz_field1 AS bizfield1,
+    txn.biz_field2 AS bizfield2,
+    txn.biz_field3 AS bizfields,
+    txn.biz_field4 AS bizfield4,
+    txn.acted_by AS actedBy,
+    txn.modified_date AS arrivalDatetime,
+    txn.created_date AS createdDate,
+    txn.sla AS sla,
+    txn.sladatetime AS slaDateTime,
+    txn.hostpostdatetime AS hostPostDateTime,
+    txn.SIR_NUMBER AS sirNumber,
+    txn.mkrchkr AS mkrchkr,
+    txn.maker_id AS makerId,
+    txn.closed_date AS closedDate,
+    txn.is_locked AS isLocked,
+    txn.customerid AS customerId,
+    txn.cust_segment AS custSegment,
+    txn.rpa_status AS rpaStatus,
+    ch.channel_name AS channelName,
+    prod.product_desc,
+    su.sub_product_desc,
+    txn.biz_field5 AS leadRefId,
+    txn.biz_field8 AS emailSenderId,
+    txn.biz_field1 AS main_case,
+    txn.complex AS complex,
+    txn.biz_field6 AS emailSenderDate,
+    txn.account_number AS accountNumber
+  FROM 
+    ibpm_case_data txn
+    INNER JOIN ibpm_function func ON txn.function = func.id
+    INNER JOIN ibpm_stages st ON st.stage_id = txn.DOC_STAGE
+    INNER JOIN ibpm_product prod ON txn.product_type = prod.product_code
+    INNER JOIN ibpm_sub_product su ON txn.sub_product_type = su.sub_product_code 
+      AND (prod.product_code = su.prod_id OR (su.sub_product_code = 'ZZ' AND prod.product_code = su.prod_id))
+    INNER JOIN ibpm_channels ch ON txn.channel = ch.channel_code
+  WHERE 
+    txn.CASE_NUM = '5576771'
+    AND txn.FUNCTION IN ('4', '2', '7')
+    AND txn.product_type IN ('21', '56', '55', '10', '41', '00', '25', '11', '20')
+    AND (
+        txn.sub_product_type IN ('015', '515', 'P15', 'C15', 'A15', 'E15', '014', '514', 'P14', 'C14', 'A14', 'E14')
+        OR txn.sub_product_type IN ('012', '512', 'P12', 'C12', 'A12', 'E12', '013', '513', 'P13', 'C13', 'A13', 'E13')
+        OR txn.sub_product_type IN ('016', '516', 'P16', 'C16', 'A16', 'E16', '011', '511', 'P11', 'C11', 'A11', 'E11')
+        OR txn.sub_product_type IN ('ANC', '006', '506', 'P06', 'C06', 'A06', 'E06', 'A57', '082', '582', 'P82', 'C82')
+        OR txn.sub_product_type IN ('A82', 'E82', '001', '501', 'P01', 'C01', 'A01', 'E01', '037', '537', 'P37', 'C37')
+        OR txn.sub_product_type IN ('A37', 'E37', '026', 'S26', 'P26', 'C26', 'A26', 'E26', '008', '508', 'P08', 'C08')
+        OR txn.sub_product_type IN ('A08', 'E08', '004', '504', 'P04', 'C04', 'A04', 'E04', 'PMD', '030', '530', 'P30')
+        OR txn.sub_product_type IN ('C30', 'A30', 'E30', 'R57', 'T57', 'ZZ', 'ZZA', 'ZZC', '007', '507', 'P07', 'C07')
+        OR txn.sub_product_type IN ('A07', 'E07', '003', '503', 'P03', 'C03', 'A03', 'E03', '375', 'CLM', '005', '505')
+        OR txn.sub_product_type IN ('P05', 'C05', 'A05', 'E05', '009', '509', 'P09', 'C09', 'A09', 'E09', 'P68', 'P59')
+        OR txn.sub_product_type IN ('P66', 'P69', 'P62', 'P60', 'P61', 'P63', 'P64', 'RJA', 'RJS', '010', '510', 'P10')
+        OR txn.sub_product_type IN ('C10', 'A10', 'E10', 'R56', 'T56', '027', 'S27', 'P27', 'C27', 'A27', 'E27')
+    )
+)
+
+UNION
+
+(
+  /* Second query for account_number exact match */
+  SELECT 
+    func.FUNCTION_NAME AS FUNCTION,
+    txn.product_type AS productType,
+    txn.PRODUCT_ID AS productId,
+    txn.REQ_DATE AS requestDate,
+    txn.REQ_DATE_TIME AS requestDateTimeStr,
+    txn.req_time AS requestTime,
+    txn.COUNTRYCODE AS country,
+    txn.DOC_STAGE AS stage,
+    txn.ID AS txnRefNumber,
+    txn.sub_stage AS substage,
+    txn.channel AS channel,
+    txn.customer_name AS customerName,
+    COALESCE(NULLIF(txn.cif_id, ''), txn.customerid) AS ciftd,
+    txn.branch_code AS branchCode,
+    txn.originals AS originals,
+    txn.bu AS bu,
+    txn.priority AS priority,
+    txn.branch_name AS branchName,
+    txn.status AS STATUS,
+    txn.sub_status AS substatus,
+    txn.assignee AS assignee,
+    txn.sub_product_type AS subProductType,
+    txn.CASE_NUM AS caseNum,
+    txn.DOC_REF_NUM AS docRefNum,
+    CASE WHEN st.stage_name LIKE '%RPA%' THEN 'RPA' ELSE st.stage_name END AS stageDesc,
+    txn.skill AS skill,
+    txn.segment AS segment,
+    txn.biz_field1 AS bizfield1,
+    txn.biz_field2 AS bizfield2,
+    txn.biz_field3 AS bizfields,
+    txn.biz_field4 AS bizfield4,
+    txn.acted_by AS actedBy,
+    txn.modified_date AS arrivalDatetime,
+    txn.created_date AS createdDate,
+    txn.sla AS sla,
+    txn.sladatetime AS slaDateTime,
+    txn.hostpostdatetime AS hostPostDateTime,
+    txn.SIR_NUMBER AS sirNumber,
+    txn.mkrchkr AS mkrchkr,
+    txn.maker_id AS makerId,
+    txn.closed_date AS closedDate,
+    txn.is_locked AS isLocked,
+    txn.customerid AS customerId,
+    txn.cust_segment AS custSegment,
+    txn.rpa_status AS rpaStatus,
+    ch.channel_name AS channelName,
+    prod.product_desc,
+    su.sub_product_desc,
+    txn.biz_field5 AS leadRefId,
+    txn.biz_field8 AS emailSenderId,
+    txn.biz_field1 AS main_case,
+    txn.complex AS complex,
+    txn.biz_field6 AS emailSenderDate,
+    txn.account_number AS accountNumber
+  FROM 
+    ibpm_case_data txn
+    INNER JOIN ibpm_function func ON txn.function = func.id
+    INNER JOIN ibpm_stages st ON st.stage_id = txn.DOC_STAGE
+    INNER JOIN ibpm_product prod ON txn.product_type = prod.product_code
+    INNER JOIN ibpm_sub_product su ON txn.sub_product_type = su.sub_product_code 
+      AND (prod.product_code = su.prod_id OR (su.sub_product_code = 'ZZ' AND prod.product_code = su.prod_id))
+    INNER JOIN ibpm_channels ch ON txn.channel = ch.channel_code
+  WHERE 
+    txn.account_number = '5576771'
+    AND txn.CASE_NUM <> '5576771' /* Avoid duplication with first query */
+    AND txn.FUNCTION IN ('4', '2', '7')
+    AND txn.product_type IN ('21', '56', '55', '10', '41', '00', '25', '11', '20')
+    AND (
+        txn.sub_product_type IN ('015', '515', 'P15', 'C15', 'A15', 'E15', '014', '514', 'P14', 'C14', 'A14', 'E14')
+        OR txn.sub_product_type IN ('012', '512', 'P12', 'C12', 'A12', 'E12', '013', '513', 'P13', 'C13', 'A13', 'E13')
+        OR txn.sub_product_type IN ('016', '516', 'P16', 'C16', 'A16', 'E16', '011', '511', 'P11', 'C11', 'A11', 'E11')
+        OR txn.sub_product_type IN ('ANC', '006', '506', 'P06', 'C06', 'A06', 'E06', 'A57', '082', '582', 'P82', 'C82')
+        OR txn.sub_product_type IN ('A82', 'E82', '001', '501', 'P01', 'C01', 'A01', 'E01', '037', '537', 'P37', 'C37')
+        OR txn.sub_product_type IN ('A37', 'E37', '026', 'S26', 'P26', 'C26', 'A26', 'E26', '008', '508', 'P08', 'C08')
+        OR txn.sub_product_type IN ('A08', 'E08', '004', '504', 'P04', 'C04', 'A04', 'E04', 'PMD', '030', '530', 'P30')
+        OR txn.sub_product_type IN ('C30', 'A30', 'E30', 'R57', 'T57', 'ZZ', 'ZZA', 'ZZC', '007', '507', 'P07', 'C07')
+        OR txn.sub_product_type IN ('A07', 'E07', '003', '503', 'P03', 'C03', 'A03', 'E03', '375', 'CLM', '005', '505')
+        OR txn.sub_product_type IN ('P05', 'C05', 'A05', 'E05', '009', '509', 'P09', 'C09', 'A09', 'E09', 'P68', 'P59')
+        OR txn.sub_product_type IN ('P66', 'P69', 'P62', 'P60', 'P61', 'P63', 'P64', 'RJA', 'RJS', '010', '510', 'P10')
+        OR txn.sub_product_type IN ('C10', 'A10', 'E10', 'R56', 'T56', '027', 'S27', 'P27', 'C27', 'A27', 'E27')
+    )
+)
+
+UNION
+
+(
+  /* Third query for biz_field2 exact match */
+  SELECT 
+    func.FUNCTION_NAME AS FUNCTION,
+    txn.product_type AS productType,
+    txn.PRODUCT_ID AS productId,
+    txn.REQ_DATE AS requestDate,
+    txn.REQ_DATE_TIME AS requestDateTimeStr,
+    txn.req_time AS requestTime,
+    txn.COUNTRYCODE AS country,
+    txn.DOC_STAGE AS stage,
+    txn.ID AS txnRefNumber,
+    txn.sub_stage AS substage,
+    txn.channel AS channel,
+    txn.customer_name AS customerName,
+    COALESCE(NULLIF(txn.cif_id, ''), txn.customerid) AS ciftd,
+    txn.branch_code AS branchCode,
+    txn.originals AS originals,
+    txn.bu AS bu,
+    txn.priority AS priority,
+    txn.branch_name AS branchName,
+    txn.status AS STATUS,
+    txn.sub_status AS substatus,
+    txn.assignee AS assignee,
+    txn.sub_product_type AS subProductType,
+    txn.CASE_NUM AS caseNum,
+    txn.DOC_REF_NUM AS docRefNum,
+    CASE WHEN st.stage_name LIKE '%RPA%' THEN 'RPA' ELSE st.stage_name END AS stageDesc,
+    txn.skill AS skill,
+    txn.segment AS segment,
+    txn.biz_field1 AS bizfield1,
+    txn.biz_field2 AS bizfield2,
+    txn.biz_field3 AS bizfields,
+    txn.biz_field4 AS bizfield4,
+    txn.acted_by AS actedBy,
+    txn.modified_date AS arrivalDatetime,
+    txn.created_date AS createdDate,
+    txn.sla AS sla,
+    txn.sladatetime AS slaDateTime,
+    txn.hostpostdatetime AS hostPostDateTime,
+    txn.SIR_NUMBER AS sirNumber,
+    txn.mkrchkr AS mkrchkr,
+    txn.maker_id AS makerId,
+    txn.closed_date AS closedDate,
+    txn.is_locked AS isLocked,
+    txn.customerid AS customerId,
+    txn.cust_segment AS custSegment,
+    txn.rpa_status AS rpaStatus,
+    ch.channel_name AS channelName,
+    prod.product_desc,
+    su.sub_product_desc,
+    txn.biz_field5 AS leadRefId,
+    txn.biz_field8 AS emailSenderId,
+    txn.biz_field1 AS main_case,
+    txn.complex AS complex,
+    txn.biz_field6 AS emailSenderDate,
+    txn.account_number AS accountNumber
+  FROM 
+    ibpm_case_data txn
+    INNER JOIN ibpm_function func ON txn.function = func.id
+    INNER JOIN ibpm_stages st ON st.stage_id = txn.DOC_STAGE
+    INNER JOIN ibpm_product prod ON txn.product_type = prod.product_code
+    INNER JOIN ibpm_sub_product su ON txn.sub_product_type = su.sub_product_code 
+      AND (prod.product_code = su.prod_id OR (su.sub_product_code = 'ZZ' AND prod.product_code = su.prod_id))
+    INNER JOIN ibpm_channels ch ON txn.channel = ch.channel_code
+  WHERE 
+    txn.biz_field2 = '5576771'
+    AND txn.CASE_NUM <> '5576771' /* Avoid duplication with first query */
+    AND txn.account_number <> '5576771' /* Avoid duplication with second query */
+    AND txn.FUNCTION IN ('4', '2', '7')
+    AND txn.product_type IN ('21', '56', '55', '10', '41', '00', '25', '11', '20')
+    AND (
+        txn.sub_product_type IN ('015', '515', 'P15', 'C15', 'A15', 'E15', '014', '514', 'P14', 'C14', 'A14', 'E14')
+        OR txn.sub_product_type IN ('012', '512', 'P12', 'C12', 'A12', 'E12', '013', '513', 'P13', 'C13', 'A13', 'E13')
+        OR txn.sub_product_type IN ('016', '516', 'P16', 'C16', 'A16', 'E16', '011', '511', 'P11', 'C11', 'A11', 'E11')
+        OR txn.sub_product_type IN ('ANC', '006', '506', 'P06', 'C06', 'A06', 'E06', 'A57', '082', '582', 'P82', 'C82')
+        OR txn.sub_product_type IN ('A82', 'E82', '001', '501', 'P01', 'C01', 'A01', 'E01', '037', '537', 'P37', 'C37')
+        OR txn.sub_product_type IN ('A37', 'E37', '026', 'S26', 'P26', 'C26', 'A26', 'E26', '008', '508', 'P08', 'C08')
+        OR txn.sub_product_type IN ('A08', 'E08', '004', '504', 'P04', 'C04', 'A04', 'E04', 'PMD', '030', '530', 'P30')
+        OR txn.sub_product_type IN ('C30', 'A30', 'E30', 'R57', 'T57', 'ZZ', 'ZZA', 'ZZC', '007', '507', 'P07', 'C07')
+        OR txn.sub_product_type IN ('A07', 'E07', '003', '503', 'P03', 'C03', 'A03', 'E03', '375', 'CLM', '005', '505')
+        OR txn.sub_product_type IN ('P05', 'C05', 'A05', 'E05', '009', '509', 'P09', 'C09', 'A09', 'E09', 'P68', 'P59')
+        OR txn.sub_product_type IN ('P66', 'P69', 'P62', 'P60', 'P61', 'P63', 'P64', 'RJA', 'RJS', '010', '510', 'P10')
+        OR txn.sub_product_type IN ('C10', 'A10', 'E10', 'R56', 'T56', '027', 'S27', 'P27', 'C27', 'A27', 'E27')
+    )
+)
+
+UNION
+
+(
+  /* Fourth query for biz_field3 exact match */
+  SELECT 
+    func.FUNCTION_NAME AS FUNCTION,
+    txn.product_type AS productType,
+    txn.PRODUCT_ID AS productId,
+    txn.REQ_DATE AS requestDate,
+    txn.REQ_DATE_TIME AS requestDateTimeStr,
+    txn.req_time AS requestTime,
+    txn.COUNTRYCODE AS country,
+    txn.DOC_STAGE AS stage,
+    txn.ID AS txnRefNumber,
+    txn.sub_stage AS substage,
+    txn.channel AS channel,
+    txn.customer_name AS customerName,
+    COALESCE(NULLIF(txn.cif_id, ''), txn.customerid) AS ciftd,
+    txn.branch_code AS branchCode,
+    txn.originals AS originals,
+    txn.bu AS bu,
+    txn.priority AS priority,
+    txn.branch_name AS branchName,
+    txn.status AS STATUS,
+    txn.sub_status AS substatus,
+    txn.assignee AS assignee,
+    txn.sub_product_type AS subProductType,
+    txn.CASE_NUM AS caseNum,
+    txn.DOC_REF_NUM AS docRefNum,
+    CASE WHEN st.stage_name LIKE '%RPA%' THEN 'RPA' ELSE st.stage_name END AS stageDesc,
+    txn.skill AS skill,
+    txn.segment AS segment,
+    txn.biz_field1 AS bizfield1,
+    txn.biz_field2 AS bizfield2,
+    txn.biz_field3 AS bizfields,
+    txn.biz_field4 AS bizfield4,
+    txn.acted_by AS actedBy,
+    txn.modified_date AS arrivalDatetime,
+    txn.created_date AS createdDate,
+    txn.sla AS sla,
+    txn.sladatetime AS slaDateTime,
+    txn.hostpostdatetime AS hostPostDateTime,
+    txn.SIR_NUMBER AS sirNumber,
+    txn.mkrchkr AS mkrchkr,
+    txn.maker_id AS makerId,
+    txn.closed_date AS closedDate,
+    txn.is_locked AS isLocked,
+    txn.customerid AS customerId,
+    txn.cust_segment AS custSegment,
+    txn.rpa_status AS rpaStatus,
+    ch.channel_name AS channelName,
+    prod.product_desc,
+    su.sub_product_desc,
+    txn.biz_field5 AS leadRefId,
+    txn.biz_field8 AS emailSenderId,
+    txn.biz_field1 AS main_case,
+    txn.complex AS complex,
+    txn.biz_field6 AS emailSenderDate,
+    txn.account_number AS accountNumber
+  FROM 
+    ibpm_case_data txn
+    INNER JOIN ibpm_function func ON txn.function = func.id
+    INNER JOIN ibpm_stages st ON st.stage_id = txn.DOC_STAGE
+    INNER JOIN ibpm_product prod ON txn.product_type = prod.product_code
+    INNER JOIN ibpm_sub_product su ON txn.sub_product_type = su.sub_product_code 
+      AND (prod.product_code = su.prod_id OR (su.sub_product_code = 'ZZ' AND prod.product_code = su.prod_id))
+    INNER JOIN ibpm_channels ch ON txn.channel = ch.channel_code
+  WHERE 
+    txn.biz_field3 = '5576771'
+    AND txn.CASE_NUM <> '5576771'
+    AND txn.account_number <> '5576771'
+    AND txn.biz_field2 <> '5576771'
+    AND txn.FUNCTION IN ('4', '2', '7')
+    AND txn.product_type IN ('21', '56', '55', '10', '41', '00', '25', '11', '20')
+    AND (
+        txn.sub_product_type IN ('015', '515', 'P15', 'C15', 'A15', 'E15', '014', '514', 'P14', 'C14', 'A14', 'E14')
+        OR txn.sub_product_type IN ('012', '512', 'P12', 'C12', 'A12', 'E12', '013', '513', 'P13', 'C13', 'A13', 'E13')
+        OR txn.sub_product_type IN ('016', '516', 'P16', 'C16', 'A16', 'E16', '011', '511', 'P11', 'C11', 'A11', 'E11')
+        OR txn.sub_product_type IN ('ANC', '006', '506', 'P06', 'C06', 'A06', 'E06', 'A57', '082', '582', 'P82', 'C82')
+        OR txn.sub_product_type IN ('A82', 'E82', '001', '501', 'P01', 'C01', 'A01', 'E01', '037', '537', 'P37', 'C37')
+        OR txn.sub_product_type IN ('A37', 'E37', '026', 'S26', 'P26', 'C26', 'A26', 'E26', '008', '508', 'P08', 'C08')
+        OR txn.sub_product_type IN ('A08', 'E08', '004', '504', 'P04', 'C04', 'A04', 'E04', 'PMD', '030', '530', 'P30')
+        OR txn.sub_product_type IN ('C30', 'A30', 'E30', 'R57', 'T57', 'ZZ', 'ZZA', 'ZZC', '007', '507', 'P07', 'C07')
+        OR txn.sub_product_type IN ('A07', 'E07', '003', '503', 'P03', 'C03', 'A03', 'E03', '375', 'CLM', '005', '505')
+        OR txn.sub_product_type IN ('P05', 'C05', 'A05', 'E05', '009', '509', 'P09', 'C09', 'A09', 'E09', 'P68', 'P59')
+        OR txn.sub_product_type IN ('P66', 'P69', 'P62', 'P60', 'P61', 'P63', 'P64', 'RJA', 'RJS', '010', '510', 'P10')
+        OR txn.sub_product_type IN ('C10', 'A10', 'E10', 'R56', 'T56', '027', 'S27', 'P27', 'C27', 'A27', 'E27')
+    )
+)
+
+UNION
+
+(
+  /* Fifth query for biz_field4 exact match */
+  SELECT 
+    func.FUNCTION_NAME AS FUNCTION,
+    txn.product_type AS productType,
+    txn.PRODUCT_ID AS productId,
+    txn.REQ_DATE AS requestDate,
+    txn.REQ_DATE_TIME AS requestDateTimeStr,
+    txn.req_time AS requestTime,
+    txn.COUNTRYCODE AS country,
+    txn.DOC_STAGE AS stage,
+    txn.ID AS txnRefNumber,
+    txn.sub_stage AS substage,
+    txn.channel AS channel,
+    txn.customer_name AS customerName,
+    COALESCE(NULLIF(txn.cif_id, ''), txn.customerid) AS ciftd,
+    txn.branch_code AS branchCode,
+    txn.originals AS originals,
+    txn.bu AS bu,
+    txn.priority AS priority,
+    txn.branch_name AS branchName,
+    txn.status AS STATUS,
+    txn.sub_status AS substatus,
+    txn.assignee AS assignee,
+    txn.sub_product_type AS subProductType,
+    txn.CASE_NUM AS caseNum,
+    txn.DOC_REF_NUM AS docRefNum,
+    CASE WHEN st.stage_name LIKE '%RPA%' THEN 'RPA' ELSE st.stage_name END AS stageDesc,
+    txn.skill AS skill,
+    txn.segment AS segment,
+    txn.biz_field1 AS bizfield1,
+    txn.biz_field2 AS bizfield2,
+    txn.biz_field3 AS bizfields,
+    txn.biz_field4 AS bizfield4,
+    txn.acted_by AS actedBy,
+    txn.modified_date AS arrivalDatetime,
+    txn.created_date AS createdDate,
+    txn.sla AS sla,
+    txn.sladatetime AS slaDateTime,
+    txn.hostpostdatetime AS hostPostDateTime,
+    txn.SIR_NUMBER AS sirNumber,
+    txn.mkrchkr AS mkrchkr,
+    txn.maker_id AS makerId,
+    txn.closed_date AS closedDate,
+    txn.is_locked AS isLocked,
+    txn.customerid AS customerId,
+    txn.cust_segment AS custSegment,
+    txn.rpa_status AS rpaStatus,
+    ch.channel_name AS channelName,
+    prod.product_desc,
+    su.sub_product_desc,
+    txn.biz_field5 AS leadRefId,
+    txn.biz_field8 AS emailSenderId,
+    txn.biz_field1 AS main_case,
+    txn.complex AS complex,
+    txn.biz_field6 AS emailSenderDate,
+    txn.account_number AS accountNumber
+  FROM 
+    ibpm_case_data txn
+    INNER JOIN ibpm_function func ON txn.function = func.id
+    INNER JOIN ibpm_stages st ON st.stage_id = txn.DOC_STAGE
+    INNER JOIN ibpm_product prod ON txn.product_type = prod.product_code
+    INNER JOIN ibpm_sub
